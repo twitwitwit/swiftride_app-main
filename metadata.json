@@ -1,0 +1,6 @@
+{
+  "name": "SwiftRide",
+  "description": "Multi-platform ride booking system with real-time GPS tracking, dual passenger and driver interfaces, secure in-app payments, ratings, and push notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
