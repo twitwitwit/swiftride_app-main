@@ -61,6 +61,7 @@ function requireRole(...roles) {
 
 // In-Memory Database (Synced across Mobile Apps and Web Admin)
 const db = {
+  auditLogs: [],
   platformStats: {
     totalPassengers: 12542,
     activeDrivers: 1650,
@@ -293,6 +294,25 @@ const db = {
   }
 };
 
+const abuseBuckets = new Map();
+function requestKey(req, action) { return `${action}:${req.ip || req.socket.remoteAddress || 'unknown'}`; }
+function enforceLimit(req, res, action, limit, windowMs) {
+  const key = requestKey(req, action);
+  const now = Date.now();
+  const recent = (abuseBuckets.get(key) || []).filter(timestamp => now - timestamp < windowMs);
+  if (recent.length >= limit) {
+    res.set('Retry-After', String(Math.ceil(windowMs / 1000)));
+    return false;
+  }
+  recent.push(now);
+  abuseBuckets.set(key, recent);
+  return true;
+}
+function appendAudit(req, action, target, details = {}) {
+  db.auditLogs.unshift({ id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, action, target, actor: req.user?.sub || req.user?.role || 'unknown', ip: req.ip, createdAt: new Date().toISOString(), details });
+  db.auditLogs.splice(500);
+}
+
 // HTTP Server & WebSocket Server
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -321,6 +341,7 @@ wss.on('connection', (ws, req) => {
 // --- REST API ENDPOINTS ---
 
 app.post('/api/auth/login', (req, res) => {
+  if (!enforceLimit(req, res, 'admin-login', 5, 15 * 60_000)) return res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
   const { username, password } = req.body || {};
   if (!ADMIN_PASSWORD_HASH) return res.status(503).json({ error: 'Admin authentication is not configured on the server' });
   if (username !== ADMIN_USERNAME || typeof password !== 'string' || !verifyPassword(password, ADMIN_PASSWORD_HASH)) {
@@ -335,6 +356,10 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api', requireAuth);
+
+app.get('/api/audit-logs', requireRole('admin'), (req, res) => {
+  res.json(db.auditLogs);
+});
 
 // System Stats
 app.get('/api/stats', (req, res) => {
@@ -369,6 +394,8 @@ app.get('/api/drivers/pending', (req, res) => {
 
 // Mobile App: Driver Application Submission
 app.post('/api/drivers/apply', (req, res) => {
+  if (!enforceLimit(req, res, 'driver-application', 3, 60 * 60_000)) return res.status(429).json({ error: 'Too many driver applications from this address' });
+  if (!req.body?.driverName || !req.body?.phone || !req.body?.vehicleModel) return res.status(400).json({ error: 'Driver name, phone, and vehicle details are required' });
   const application = {
     id: `app-${Date.now()}`,
     status: 'pending',
@@ -415,6 +442,7 @@ app.post('/api/drivers/applications/:id/approve', requireRole('admin'), (req, re
     db.platformStats.activeDrivers += 1;
     if (db.platformStats.pendingApplications > 0) db.platformStats.pendingApplications -= 1;
 
+    appendAudit(req, 'driver_application_approved', id, { driverId: newDriver.id });
     broadcast('driver_application_updated', { id, status: 'approved', driver: newDriver });
     return res.json({ success: true, driver: newDriver });
   }
@@ -433,6 +461,7 @@ app.post('/api/drivers/applications/:id/reject', requireRole('admin'), (req, res
     db.pendingApplications.splice(appIndex, 1);
     if (db.platformStats.pendingApplications > 0) db.platformStats.pendingApplications -= 1;
 
+    appendAudit(req, 'driver_application_rejected', id, { reason });
     broadcast('driver_application_updated', { id, status: 'rejected', reason });
     return res.json({ success: true });
   }
@@ -446,14 +475,20 @@ app.get('/api/rides', (req, res) => {
 
 // Mobile App: Passenger Requests Ride
 app.post('/api/rides/request', (req, res) => {
+  if (!enforceLimit(req, res, 'ride-request', 10, 60_000)) return res.status(429).json({ error: 'Too many ride requests. Please try again later.' });
+  const { passengerName, pickup, dropoff, estimatedFare, fare } = req.body || {};
+  if (!passengerName || !pickup?.name || !dropoff?.name) return res.status(400).json({ error: 'Passenger, pickup, and dropoff are required' });
+  const requestedFare = Number(estimatedFare ?? fare ?? 0);
+  if (!Number.isFinite(requestedFare) || requestedFare < 0 || requestedFare > 100000) return res.status(400).json({ error: 'Invalid fare amount' });
   const ride = {
+    ...req.body,
     id: `SR-${Math.floor(1000 + Math.random() * 9000)}`,
     status: 'requested',
-    date: new Date().toLocaleString(),
-    ...req.body
+    date: new Date().toISOString()
   };
   db.rides.unshift(ride);
   db.platformStats.totalBookings += 1;
+  appendAudit(req, 'ride_requested', ride.id, { pickup: pickup.name, dropoff: dropoff.name });
   broadcast('ride_requested', ride);
   res.json({ success: true, ride });
 });
@@ -462,16 +497,20 @@ app.post('/api/rides/request', (req, res) => {
 app.patch('/api/rides/:id/status', (req, res) => {
   const { id } = req.params;
   const { status, driverName, driverPhone, driverPlate } = req.body;
+  const normalizedStatus = { ACTIVE: 'accepted', ACCEPTED: 'accepted', DRIVER_ARRIVED: 'driver_arriving', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', CANCELLED: 'cancelled' }[String(status || '').toUpperCase()] || String(status || '').toLowerCase();
   const ride = db.rides.find(r => r.id === id);
   if (ride) {
-    ride.status = status;
+    const transitions = { requested: ['accepted', 'cancelled'], accepted: ['driver_arriving', 'cancelled'], driver_arriving: ['in_progress', 'cancelled'], in_progress: ['completed', 'cancelled'], completed: [], cancelled: [] };
+    if (!transitions[ride.status]?.includes(normalizedStatus)) return res.status(409).json({ error: `Invalid ride transition from ${ride.status} to ${normalizedStatus}` });
+    ride.status = normalizedStatus;
     if (driverName) ride.driverName = driverName;
     if (driverPhone) ride.driverPhone = driverPhone;
     if (driverPlate) ride.driverPlate = driverPlate;
     
-    if (status === 'completed') {
+    if (normalizedStatus === 'completed') {
       db.platformStats.dailyRevenue += ride.fare || 0;
     }
+    appendAudit(req, 'ride_status_updated', id, { status: normalizedStatus });
     
     broadcast('ride_status_updated', ride);
     return res.json({ success: true, ride });
@@ -509,6 +548,7 @@ app.patch('/api/tickets/:id', requireRole('admin'), (req, res) => {
     if (status === 'resolved' && db.platformStats.openTickets > 0) {
       db.platformStats.openTickets -= 1;
     }
+    appendAudit(req, 'ticket_updated', id, { status });
     broadcast('support_ticket_updated', ticket);
     return res.json({ success: true, ticket });
   }
@@ -542,6 +582,7 @@ app.get('/api/settings', (req, res) => {
 
 app.put('/api/settings', requireRole('admin'), (req, res) => {
   db.settings = { ...db.settings, ...req.body };
+  appendAudit(req, 'settings_updated', 'platform', { fields: Object.keys(req.body || {}) });
   broadcast('settings_updated', db.settings);
   res.json({ success: true, settings: db.settings });
 });
@@ -552,13 +593,16 @@ app.get('/api/emergencies', (req, res) => {
 });
 
 app.post('/api/emergencies', (req, res) => {
+  if (!enforceLimit(req, res, 'sos', 3, 300_000)) return res.status(429).json({ error: 'Too many SOS requests. Please contact emergency services directly if this is urgent.' });
+  if (!req.body?.userName && !req.body?.passengerName && !req.body?.driverName) return res.status(400).json({ error: 'Emergency identity is required' });
   const emergency = {
+    ...req.body,
     id: `SOS-${Math.floor(1000 + Math.random() * 9000)}`,
     status: 'active',
-    createdAt: 'Just now',
-    ...req.body
+    createdAt: new Date().toISOString()
   };
   db.emergencies.unshift(emergency);
+  appendAudit(req, 'emergency_created', emergency.id, { emergencyType: emergency.emergencyType || 'unknown' });
   broadcast('emergency_triggered', emergency);
   res.json({ success: true, emergency });
 });
@@ -568,6 +612,7 @@ app.patch('/api/emergencies/:id', requireRole('admin'), (req, res) => {
   const emergency = db.emergencies.find(e => e.id === id);
   if (emergency) {
     Object.assign(emergency, req.body);
+    appendAudit(req, 'emergency_updated', id, { status: emergency.status });
     broadcast('emergency_updated', emergency);
     return res.json({ success: true, emergency });
   }
