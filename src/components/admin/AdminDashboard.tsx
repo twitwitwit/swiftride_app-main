@@ -14,10 +14,11 @@ import { AdminSettings } from './AdminSettings';
 import { AdminEmergency } from './AdminEmergency';
 import { AdminAuth } from './AdminAuth';
 import { useRide } from '../../context/RideContext';
+import { clearAuthToken, getAuthToken } from '../../lib/api';
 
 export const AdminDashboard: React.FC = () => {
   const { pendingApplications, supportTickets, emergencyRequests } = useRide();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(getAuthToken()));
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
 
   const pendingApplicationsCount = pendingApplications.filter(a => a.status === 'pending').length;
@@ -25,7 +26,7 @@ export const AdminDashboard: React.FC = () => {
   const activeEmergencyCount = emergencyRequests.filter(e => e.status === 'active').length;
 
   if (!isAuthenticated) {
-    return <AdminAuth onLogin={() => setIsAuthenticated(true)} />;
+    return <AdminAuth onLogin={() => { setIsAuthenticated(true); window.location.reload(); }} />;
   }
 
   const getHeaderDetails = () => {
@@ -68,7 +69,7 @@ export const AdminDashboard: React.FC = () => {
         pendingApplicationsCount={pendingApplicationsCount}
         openTicketsCount={openTicketsCount}
         activeEmergencyCount={activeEmergencyCount}
-        onLogout={() => setIsAuthenticated(false)}
+        onLogout={() => { clearAuthToken(); setIsAuthenticated(false); }}
       />
 
       {/* Main Content Area */}

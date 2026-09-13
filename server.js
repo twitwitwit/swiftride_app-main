@@ -1,13 +1,63 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
+import crypto from 'node:crypto';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const TOKEN_SECRET = process.env.SWIFTRIDE_TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+const MOBILE_CLIENT_KEY = process.env.SWIFTRIDE_MOBILE_KEY || '';
+const ADMIN_USERNAME = process.env.SWIFTRIDE_ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD_HASH = process.env.SWIFTRIDE_ADMIN_PASSWORD_HASH || '';
 
-app.use(cors());
+app.use(cors({ origin: process.env.SWIFTRIDE_WEB_ORIGIN ? process.env.SWIFTRIDE_WEB_ORIGIN.split(',') : true }));
 app.use(express.json());
+
+function verifyPassword(password, encodedHash) {
+  const [salt, expected] = encodedHash.split(':');
+  if (!salt || !expected) return false;
+  const actual = crypto.scryptSync(password, salt, 64).toString('hex');
+  return crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expected, 'hex'));
+}
+
+function createToken(payload) {
+  const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 8 * 60 * 60 * 1000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
+  return `${body}.${signature}`;
+}
+
+function readToken(token) {
+  const [body, signature] = String(token || '').split('.');
+  if (!body || !signature) return null;
+  const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(body).digest('base64url');
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    return payload.exp > Date.now() ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function requireAuth(req, res, next) {
+  const bearer = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+  const tokenPayload = readToken(bearer);
+  if (tokenPayload) {
+    req.user = tokenPayload;
+    return next();
+  }
+  if (MOBILE_CLIENT_KEY && req.get('x-swiftride-client-key') === MOBILE_CLIENT_KEY) {
+    req.user = { role: 'mobile' };
+    return next();
+  }
+  return res.status(401).json({ error: 'Authentication required' });
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => roles.includes(req.user?.role) ? next() : res.status(403).json({ error: 'Insufficient permissions' });
+}
 
 // In-Memory Database (Synced across Mobile Apps and Web Admin)
 const db = {
@@ -256,17 +306,35 @@ function broadcast(type, payload) {
   });
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  const tokenPayload = readToken(url.searchParams.get('token'));
+  const mobileClient = MOBILE_CLIENT_KEY && url.searchParams.get('clientKey') === MOBILE_CLIENT_KEY;
+  if (!tokenPayload && !mobileClient) {
+    ws.close(1008, 'Authentication required');
+    return;
+  }
   console.log('⚡ New Client Connected (Web Admin / Mobile App)');
   ws.send(JSON.stringify({ type: 'CONNECTED', payload: { message: 'SwiftRide Central Gateway Connected' } }));
 });
 
 // --- REST API ENDPOINTS ---
 
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!ADMIN_PASSWORD_HASH) return res.status(503).json({ error: 'Admin authentication is not configured on the server' });
+  if (username !== ADMIN_USERNAME || typeof password !== 'string' || !verifyPassword(password, ADMIN_PASSWORD_HASH)) {
+    return res.status(401).json({ error: 'Invalid administrative credentials' });
+  }
+  res.json({ token: createToken({ sub: username, role: 'admin' }), role: 'admin' });
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'online', service: 'SwiftRide Central Backend API', timestamp: new Date().toISOString() });
 });
+
+app.use('/api', requireAuth);
 
 // System Stats
 app.get('/api/stats', (req, res) => {
@@ -278,7 +346,7 @@ app.get('/api/passengers', (req, res) => {
   res.json(db.passengers);
 });
 
-app.patch('/api/passengers/:id/status', (req, res) => {
+app.patch('/api/passengers/:id/status', requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   const passenger = db.passengers.find(p => p.id === id);
@@ -320,7 +388,7 @@ app.post('/api/drivers/apply', (req, res) => {
 });
 
 // Admin: Approve Driver Application
-app.post('/api/drivers/applications/:id/approve', (req, res) => {
+app.post('/api/drivers/applications/:id/approve', requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const appIndex = db.pendingApplications.findIndex(a => a.id === id);
   if (appIndex !== -1) {
@@ -354,7 +422,7 @@ app.post('/api/drivers/applications/:id/approve', (req, res) => {
 });
 
 // Admin: Reject Driver Application
-app.post('/api/drivers/applications/:id/reject', (req, res) => {
+app.post('/api/drivers/applications/:id/reject', requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
   const appIndex = db.pendingApplications.findIndex(a => a.id === id);
@@ -431,7 +499,7 @@ app.post('/api/tickets', (req, res) => {
 });
 
 // Admin: Resolve Ticket
-app.patch('/api/tickets/:id', (req, res) => {
+app.patch('/api/tickets/:id', requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const { status, resolutionNote } = req.body;
   const ticket = db.tickets.find(t => t.id === id);
@@ -452,7 +520,7 @@ app.get('/api/notifications', (req, res) => {
   res.json(db.notifications);
 });
 
-app.post('/api/notifications/broadcast', (req, res) => {
+app.post('/api/notifications/broadcast', requireRole('admin'), (req, res) => {
   const { title, message, category, type } = req.body;
   const notification = {
     id: `n-${Date.now()}`,
@@ -472,7 +540,7 @@ app.get('/api/settings', (req, res) => {
   res.json(db.settings);
 });
 
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', requireRole('admin'), (req, res) => {
   db.settings = { ...db.settings, ...req.body };
   broadcast('settings_updated', db.settings);
   res.json({ success: true, settings: db.settings });
@@ -495,7 +563,7 @@ app.post('/api/emergencies', (req, res) => {
   res.json({ success: true, emergency });
 });
 
-app.patch('/api/emergencies/:id', (req, res) => {
+app.patch('/api/emergencies/:id', requireRole('admin'), (req, res) => {
   const { id } = req.params;
   const emergency = db.emergencies.find(e => e.id === id);
   if (emergency) {
@@ -510,4 +578,3 @@ server.listen(PORT, () => {
   console.log(`🚀 SwiftRide Central Gateway running on http://localhost:${PORT}`);
   console.log(`⚡ WebSocket Server running on ws://localhost:${PORT}`);
 });
-

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { SwiftRideLogo } from '../common/SwiftRideLogo';
 import { Shield, Lock, User, ArrowRight, AlertCircle, Key } from 'lucide-react';
 import { motion } from 'motion/react';
+import { loginAdmin } from '../../lib/api';
 
 interface AdminAuthProps {
   onLogin: () => void;
@@ -13,20 +14,17 @@ export const AdminAuth: React.FC<AdminAuthProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
-
-    // Simulate authentication delay
-    setTimeout(() => {
-      if (username === 'admin' && password === 'admin123') {
-        onLogin();
-      } else {
-        setError('Invalid administrative credentials. Access denied.');
-        setIsLoading(false);
-      }
-    }, 1200);
+    try {
+      await loginAdmin(username, password);
+      onLogin();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Invalid administrative credentials. Access denied.');
+      setIsLoading(false);
+    }
   };
 
   return (

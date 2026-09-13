@@ -26,6 +26,7 @@ import {
   INITIAL_PLATFORM_STATS, 
   INITIAL_SUPPORT_TICKETS 
 } from '../data/mockData';
+import { apiFetch, getWebSocketUrl } from '../lib/api';
 
 interface RideContextType {
   platformView: ActivePlatformView;
@@ -213,16 +214,13 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Real-time Express & WebSocket API Backend Syncing
   useEffect(() => {
-    const API_BASE = 'http://localhost:5000/api';
-    const WS_BASE = 'ws://localhost:5000';
-
     const fetchInitialData = async () => {
       try {
         const [statsRes, appsRes, ticketsRes, emergenciesRes] = await Promise.allSettled([
-          fetch(`${API_BASE}/stats`),
-          fetch(`${API_BASE}/drivers/pending`),
-          fetch(`${API_BASE}/tickets`),
-          fetch(`${API_BASE}/emergencies`)
+          apiFetch('/stats'),
+          apiFetch('/drivers/pending'),
+          apiFetch('/tickets'),
+          apiFetch('/emergencies')
         ]);
 
         if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
@@ -259,7 +257,7 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let socket: WebSocket | null = null;
     try {
-      socket = new WebSocket(WS_BASE);
+      socket = new WebSocket(getWebSocketUrl());
       socket.onopen = () => console.log('⚡ Connected to Central SwiftRide WebSocket Gateway');
       socket.onmessage = (event) => {
         try {
@@ -742,11 +740,13 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showNotification('Emergency SOS Activated', `Emergency alert broadcasted to 24/7 Command Center for ${newEmergency.userName}.`, 'warning');
 
     try {
-      fetch('http://localhost:5000/api/emergencies', {
+      apiFetch('/emergencies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newEmergency)
-      }).catch(() => {});
+      }).then(response => { if (!response.ok) throw new Error('Emergency was not accepted by the server'); }).catch(error => {
+        showNotification('Emergency sync failed', error instanceof Error ? error.message : 'Please retry the SOS action.', 'warning');
+      });
     } catch {
       // ignore
     }
@@ -769,11 +769,13 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
     showNotification('Emergency Alert Resolved', `SOS #${id} has been marked as resolved.`, 'success');
 
     try {
-      fetch(`http://localhost:5000/api/emergencies/${id}`, {
+      apiFetch(`/emergencies/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'resolved', notes })
-      }).catch(() => {});
+      }).then(response => { if (!response.ok) throw new Error('Emergency update failed'); }).catch(error => {
+        showNotification('Emergency update failed', error instanceof Error ? error.message : 'The server could not be updated.', 'warning');
+      });
     } catch {
       // ignore
     }
@@ -792,11 +794,13 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }));
 
     try {
-      fetch(`http://localhost:5000/api/emergencies/${id}`, {
+      apiFetch(`/emergencies/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, assignedResponder: responder })
-      }).catch(() => {});
+      }).then(response => { if (!response.ok) throw new Error('Emergency update failed'); }).catch(error => {
+        showNotification('Emergency update failed', error instanceof Error ? error.message : 'The server could not be updated.', 'warning');
+      });
     } catch {
       // ignore
     }
