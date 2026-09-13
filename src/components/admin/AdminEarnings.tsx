@@ -34,6 +34,14 @@ const REVENUE_BREAKDOWN_DATA = [
 export const AdminEarnings: React.FC = () => {
   const { platformStats, showNotification } = useRide();
 
+  const downloadLedger = () => {
+    const csv = [['day', 'gross', 'commission', 'driverPayout'], ...REVENUE_BREAKDOWN_DATA.map(row => [row.day, row.gross, row.commission, row.driverPayout])]
+      .map(row => row.join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'swiftride-financial-ledger.csv'; link.click(); URL.revokeObjectURL(url);
+    showNotification('Ledger Downloaded', 'The financial ledger CSV was downloaded successfully.', 'success');
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -44,7 +52,7 @@ export const AdminEarnings: React.FC = () => {
         </div>
 
         <button
-          onClick={() => showNotification('Financial Report Downloaded', 'Audit reconciliation report generated in Excel & PDF formats.', 'success')}
+          onClick={downloadLedger}
           className="flex items-center gap-1.5 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs transition-colors"
         >
           <Download className="w-4 h-4" />

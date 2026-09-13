@@ -122,7 +122,7 @@ export const AdminNotifications: React.FC = () => {
             border: 'border-emerald-400/20'
           },
         ].map((note, i) => (
-          <div key={i} className={`p-4 rounded-2xl border ${note.border} ${note.bg} flex gap-4 hover:brightness-110 transition-all cursor-pointer`}>
+          <div key={i} onClick={() => setReadIds(prev => new Set(prev).add(i))} className={`p-4 rounded-2xl border ${note.border} ${note.bg} flex gap-4 hover:brightness-110 transition-all cursor-pointer ${readIds.has(i) ? 'opacity-50' : ''}`}>
             <div className={`w-10 h-10 shrink-0 rounded-xl bg-zinc-950 flex items-center justify-center border ${note.border}`}>
               <note.icon className={`w-5 h-5 ${note.color}`} />
             </div>
@@ -137,11 +137,17 @@ export const AdminNotifications: React.FC = () => {
             </div>
           </div>
         ))}
+        {showOlder && (
+          <>
+            <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-950 flex gap-4"><div className="w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center"><Info className="w-5 h-5 text-slate-500" /></div><div><p className="text-sm font-black text-white">Monthly reconciliation completed</p><p className="text-xs text-slate-500">Yesterday · Finance export archived successfully.</p></div></div>
+            <div className="p-4 rounded-2xl border border-zinc-800 bg-zinc-950 flex gap-4"><div className="w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center"><Server className="w-5 h-5 text-slate-500" /></div><div><p className="text-sm font-black text-white">Service health check passed</p><p className="text-xs text-slate-500">2 days ago · All central services reported healthy.</p></div></div>
+          </>
+        )}
       </div>
 
       <div className="flex justify-center pt-4">
-        <button className="px-6 py-2 bg-zinc-900 border border-zinc-800 text-slate-400 text-xs font-mono font-black rounded-xl hover:text-white transition-colors cursor-pointer uppercase tracking-widest">
-          Load Older Notifications
+        <button onClick={() => setShowOlder(true)} className="px-6 py-2 bg-zinc-900 border border-zinc-800 text-slate-400 text-xs font-mono font-black rounded-xl hover:text-white transition-colors cursor-pointer uppercase tracking-widest">
+          {showOlder ? 'Older Notifications Loaded' : 'Load Older Notifications'}
         </button>
       </div>
     </div>

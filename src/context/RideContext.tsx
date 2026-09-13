@@ -38,6 +38,7 @@ interface RideContextType {
   passenger: PassengerUser;
   driver: DriverUser;
   updatePassenger: (data: Partial<PassengerUser>) => void;
+  updatePassengerStatus: (id: string, status: string) => Promise<void>;
   updateDriver: (data: Partial<DriverUser>) => void;
   
   // Rides
@@ -116,6 +117,7 @@ interface RideContextType {
   closeNotification: () => void;
   showNotification: (title: string, message: string, type?: 'info' | 'success' | 'warning') => void;
   resetAllDemoData: () => void;
+  savePlatformSettings: (settings: Record<string, unknown>) => Promise<void>;
 }
 
 const RideContext = createContext<RideContextType | undefined>(undefined);
@@ -628,6 +630,9 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const approveApplication = (appId: string) => {
+    apiFetch(`/drivers/applications/${appId}/approve`, { method: 'POST' }).then(response => {
+      if (!response.ok) throw new Error('The server rejected this approval');
+    }).catch(error => showNotification('Approval failed', error instanceof Error ? error.message : 'Please try again.', 'warning'));
     setPendingApplications(prev => prev.map(a => a.id === appId ? { ...a, status: 'approved' } : a));
     setPlatformStats(prev => ({
       ...prev,
@@ -638,6 +643,9 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const rejectApplication = (appId: string) => {
+    apiFetch(`/drivers/applications/${appId}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Rejected by admin review' }) }).then(response => {
+      if (!response.ok) throw new Error('The server rejected this decision');
+    }).catch(error => showNotification('Rejection failed', error instanceof Error ? error.message : 'Please try again.', 'warning'));
     setPendingApplications(prev => prev.map(a => a.id === appId ? { ...a, status: 'rejected' } : a));
     setPlatformStats(prev => ({
       ...prev,
@@ -693,9 +701,30 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const resolveSupportTicket = (ticketId: string) => {
+    apiFetch(`/tickets/${ticketId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'resolved' }) }).then(response => {
+      if (!response.ok) throw new Error('The server rejected this ticket update');
+    }).catch(error => showNotification('Ticket update failed', error instanceof Error ? error.message : 'Please try again.', 'warning'));
     setSupportTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'resolved' } : t));
     setPlatformStats(prev => ({ ...prev, supportTickets: Math.max(0, prev.supportTickets - 1) }));
     showNotification('Ticket Resolved', `Ticket #${ticketId} closed successfully.`, 'success');
+  };
+
+  const updatePassengerStatus = async (id: string, status: string) => {
+    const response = await apiFetch(`/passengers/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!response.ok) throw new Error('The server rejected the passenger status update');
+  };
+
+  const savePlatformSettings = async (settings: Record<string, unknown>) => {
+    const response = await apiFetch('/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!response.ok) throw new Error('The server rejected the platform settings');
   };
 
   const triggerEmergencyRequest = (params?: {
@@ -831,6 +860,7 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
         passenger,
         driver,
         updatePassenger,
+        updatePassengerStatus,
         updateDriver,
         activeRide,
         rideHistory,
@@ -868,7 +898,8 @@ export const RideProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearNotification,
         closeNotification: clearNotification,
         showNotification,
-        resetAllDemoData
+        resetAllDemoData,
+        savePlatformSettings
       }}
     >
       {children}

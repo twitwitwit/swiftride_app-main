@@ -31,7 +31,8 @@ export const AdminBookings: React.FC = () => {
   ];
 
   const filtered = allBookings.filter(b => {
-    if (filterStatus !== 'All' && b.status !== filterStatus.toLowerCase().replace(' ', '_')) {
+    const normalizedFilter = filterStatus.toLowerCase().replace(' ', '_');
+    if (filterStatus !== 'All' && b.status !== normalizedFilter && !(normalizedFilter === 'arriving' && String(b.status) === 'driver_arriving')) {
       return false;
     }
     if (search.trim()) {
@@ -46,6 +47,14 @@ export const AdminBookings: React.FC = () => {
     }
     return true;
   });
+
+  const exportBookings = () => {
+    const csv = [['id', 'passenger', 'driver', 'pickup', 'dropoff', 'fare', 'payment', 'status'], ...filtered.map(b => [b.id, b.passengerName, b.driverName || '', b.pickup.name, b.dropoff.name, b.fare, b.paymentMethod, b.status])]
+      .map(row => row.map(value => JSON.stringify(value ?? '')).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'swiftride-bookings.csv'; link.click(); URL.revokeObjectURL(url);
+    showNotification('Export Complete', `${filtered.length} bookings downloaded as CSV.`, 'success');
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -68,7 +77,7 @@ export const AdminBookings: React.FC = () => {
             />
           </div>
           <button
-            onClick={() => showNotification('Audit Export', 'All ride records exported to CSV format.', 'success')}
+            onClick={exportBookings}
             className="px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs transition-colors"
           >
             Export All
@@ -112,7 +121,7 @@ export const AdminBookings: React.FC = () => {
               {filtered.map(booking => {
                 const isCompleted = booking.status === 'completed';
                 const isCancelled = booking.status === 'cancelled';
-                const isLive = ['requested', 'accepted', 'arriving', 'in_progress'].includes(booking.status);
+                const isLive = ['requested', 'accepted', 'driver_arriving', 'in_progress'].includes(booking.status);
 
                 return (
                   <tr key={booking.id} className="hover:bg-slate-800/40 transition-colors">
@@ -209,7 +218,12 @@ export const AdminBookings: React.FC = () => {
 
             <button
               onClick={() => {
-                showNotification('Waybill PDF Generated', 'Official trip manifest saved.', 'success');
+                const printWindow = window.open('', '_blank', 'width=720,height=720');
+                if (printWindow) {
+                  printWindow.document.write(`<html><head><title>SwiftRide Waybill ${selectedBooking.id}</title></head><body><h1>SwiftRide Trip Waybill</h1><p><strong>Trip ID:</strong> ${selectedBooking.id}</p><p><strong>Passenger:</strong> ${selectedBooking.passengerName}</p><p><strong>Driver:</strong> ${selectedBooking.driverName || 'Pending Driver'}</p><p><strong>Route:</strong> ${selectedBooking.pickup.address} → ${selectedBooking.dropoff.address}</p><p><strong>Fare:</strong> ₱${selectedBooking.fare.toFixed(2)}</p><script>window.print();</script></body></html>`);
+                  printWindow.document.close();
+                }
+                showNotification('Waybill Ready', 'The print dialog was opened for the official trip manifest.', 'success');
                 setSelectedBooking(null);
               }}
               className="w-full py-2.5 bg-amber-400 text-slate-950 font-black rounded-xl text-xs"

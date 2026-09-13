@@ -3,7 +3,7 @@ import { Settings, DollarSign, Shield, Save } from 'lucide-react';
 import { useRide } from '../../context/RideContext';
 
 export const AdminSettings: React.FC = () => {
-  const { showNotification } = useRide();
+  const { showNotification, savePlatformSettings } = useRide();
 
   // Fare settings state
   const [baseFare, setBaseFare] = useState<number>(45.00);
@@ -16,12 +16,13 @@ export const AdminSettings: React.FC = () => {
   const [vehicleVerification, setVehicleVerification] = useState<boolean>(true);
   const [autoSuspend, setAutoSuspend] = useState<boolean>(false);
 
-  const handleSave = () => {
-    showNotification(
-      'Settings Applied',
-      `Platform configuration saved. Base fare ₱${baseFare}, commission ${commission}%.`,
-      'success'
-    );
+  const handleSave = async () => {
+    try {
+      await savePlatformSettings({ baseFare, perKmRate, commission, surgeMax, twoFactor, vehicleVerification, autoSuspend });
+      showNotification('Settings Applied', `Platform configuration saved. Base fare ₱${baseFare}, commission ${commission}%.`, 'success');
+    } catch (error) {
+      showNotification('Settings Save Failed', error instanceof Error ? error.message : 'Please try again.', 'warning');
+    }
   };
 
   const toggleClass = (active: boolean) =>

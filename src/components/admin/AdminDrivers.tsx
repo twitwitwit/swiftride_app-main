@@ -28,6 +28,7 @@ export const AdminDrivers: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'approved' | 'pending'>('approved');
   const [search, setSearch] = useState<string>('');
+  const [selectedDriver, setSelectedDriver] = useState<any | null>(null);
 
   // Sample fleet list
   const [activeFleet, setActiveFleet] = useState<any[]>([
@@ -180,7 +181,7 @@ export const AdminDrivers: React.FC = () => {
                     </td>
                     <td className="p-4 text-right">
                       <button
-                        onClick={() => showNotification('Driver Audit File', `Viewing telemetry & LTFRB compliance records for ${d.name}`, 'info')}
+                        onClick={() => setSelectedDriver(d)}
                         className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg transition-colors cursor-pointer"
                       >
                         Inspect
@@ -261,6 +262,15 @@ export const AdminDrivers: React.FC = () => {
                 )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {selectedDriver && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 text-white rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between"><h3 className="text-lg font-black">Driver Audit File</h3><button onClick={() => setSelectedDriver(null)} className="text-slate-400 hover:text-white" aria-label="Close driver audit">✕</button></div>
+            <div className="grid grid-cols-2 gap-3 bg-slate-950 p-4 rounded-2xl text-xs"><span>Name</span><strong>{selectedDriver.name}</strong><span>Vehicle</span><strong>{selectedDriver.vehicle}</strong><span>Plate</span><strong>{selectedDriver.plateNumber}</strong><span>Rating</span><strong>{selectedDriver.rating} / 5</strong><span>Trips</span><strong>{selectedDriver.totalTrips}</strong><span>Acceptance</span><strong>{selectedDriver.acceptanceRate}%</strong></div>
+            <button onClick={() => { showNotification('Audit File Reviewed', `${selectedDriver.name}'s compliance details were reviewed.`, 'info'); setSelectedDriver(null); }} className="w-full py-2 bg-amber-400 text-slate-950 font-bold rounded-xl text-xs">Mark Audit Reviewed</button>
           </div>
         </div>
       )}

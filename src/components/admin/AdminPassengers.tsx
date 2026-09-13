@@ -20,7 +20,7 @@ import {
 import { useRide } from '../../context/RideContext';
 
 export const AdminPassengers: React.FC = () => {
-  const { passenger, showNotification } = useRide();
+  const { passenger, showNotification, updatePassengerStatus } = useRide();
   const [search, setSearch] = useState<string>('');
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
 
@@ -94,15 +94,37 @@ export const AdminPassengers: React.FC = () => {
     p.email.toLowerCase().includes(search.toLowerCase())
   );
 
-  const toggleStatus = (id: string) => {
+  const toggleStatus = async (id: string) => {
+    const current = passengersList.find(p => p.id === id);
+    if (!current) return;
+    const nextStatus = current.status === 'Active' ? 'Suspended' : 'Active';
+    try {
+      await updatePassengerStatus(id, nextStatus);
+    } catch (error) {
+      showNotification('Status update failed', error instanceof Error ? error.message : 'Please try again.', 'warning');
+      return;
+    }
     setPassengersList(prev => prev.map(p => {
       if (p.id === id) {
-        const nextStatus = p.status === 'Active' ? 'Suspended' : 'Active';
         showNotification('User Status Updated', `${p.name} is now ${nextStatus}`, 'info');
         return { ...p, status: nextStatus };
       }
       return p;
     }));
+  };
+
+  const exportCsv = () => {
+    const headers = ['id', 'name', 'phone', 'email', 'walletBalance', 'completedRides', 'rating', 'status', 'joinedDate'];
+    const csv = [headers, ...filtered.map(row => headers.map(header => JSON.stringify(row[header] ?? '')).join(','))].map(row => Array.isArray(row) ? row.join(',') : row).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'swiftride-passengers.csv'; link.click(); URL.revokeObjectURL(url);
+    showNotification('Export Complete', `${filtered.length} passenger records downloaded as CSV.`, 'success');
+  };
+
+  const creditWallet = (id: string) => {
+    setPassengersList(prev => prev.map(p => p.id === id ? { ...p, walletBalance: p.walletBalance + 500 } : p));
+    setSelectedUser(prev => prev?.id === id ? { ...prev, walletBalance: prev.walletBalance + 500 } : prev);
+    showNotification('Wallet Credited', '₱500 promotional credit added successfully.', 'success');
   };
 
   return (
@@ -126,7 +148,7 @@ export const AdminPassengers: React.FC = () => {
             />
           </div>
           <button
-            onClick={() => showNotification('Export Passenger List', 'CSV dataset generated and ready for export.', 'success')}
+            onClick={exportCsv}
             className="px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs transition-colors"
           >
             Export CSV
@@ -258,7 +280,7 @@ export const AdminPassengers: React.FC = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  showNotification('Wallet Credited', `₱500 promotional credit added to ${selectedUser.name}`, 'success');
+                  creditWallet(selectedUser.id);
                   setSelectedUser(null);
                 }}
                 className="flex-1 py-2.5 bg-amber-400 text-slate-950 font-bold rounded-xl text-xs hover:bg-amber-500"

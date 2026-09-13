@@ -15,7 +15,7 @@ import { useRide } from '../../context/RideContext';
 import { SupportTicket } from '../../types';
 
 export const AdminSupport: React.FC = () => {
-  const { supportTickets, resolveSupportTicket, showNotification } = useRide();
+  const { supportTickets, resolveSupportTicket, replySupportTicket, showNotification } = useRide();
   const [filter, setFilter] = useState<'All' | 'open' | 'in_progress' | 'resolved'>('All');
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [replyText, setReplyText] = useState<string>('');
@@ -27,6 +27,7 @@ export const AdminSupport: React.FC = () => {
 
   const handleSendReply = () => {
     if (!replyText.trim() || !selectedTicket) return;
+    replySupportTicket(selectedTicket.id, replyText.trim());
     showNotification('Reply Dispatched', `Admin response sent to ${selectedTicket.userName}.`, 'success');
     resolveSupportTicket(selectedTicket.id);
     setSelectedTicket(null);

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Compass, RefreshCw, Layers, MapPin } from 'lucide-react';
 import { InteractiveMap } from '../common/InteractiveMap';
 import { useRide } from '../../context/RideContext';
 
 export const AdminLiveMap: React.FC = () => {
   const { activeRide, driver, showNotification } = useRide();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [lastRefresh, setLastRefresh] = useState<string>('not refreshed');
 
   return (
     <div className="p-6 space-y-5 h-full flex flex-col">
@@ -17,7 +19,7 @@ export const AdminLiveMap: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => showNotification('Fleet Radar Refreshed', 'Synced with 2,315 active vehicle nodes.', 'success')}
+            onClick={() => { setRefreshKey(value => value + 1); setLastRefresh(new Date().toLocaleTimeString()); showNotification('Fleet Radar Refreshed', 'Telemetry map reloaded successfully.', 'success'); }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700"
           >
             <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
@@ -31,7 +33,7 @@ export const AdminLiveMap: React.FC = () => {
         <div className="flex items-center justify-between z-10 mb-2">
           <div className="flex items-center gap-2 bg-slate-950/80 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-            <span className="text-white font-bold">2,315 Vehicles Tracked</span>
+            <span className="text-white font-bold">2,315 Vehicles Tracked · {lastRefresh}</span>
           </div>
 
           <div className="flex gap-2 text-xs">
@@ -42,7 +44,7 @@ export const AdminLiveMap: React.FC = () => {
         </div>
 
         <div className="flex-1 w-full relative rounded-2xl overflow-hidden">
-          <InteractiveMap
+          <InteractiveMap key={refreshKey}
             pickup={activeRide?.pickup}
             dropoff={activeRide?.dropoff}
             routeProgress={activeRide?.routeProgress}
